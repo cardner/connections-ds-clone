@@ -13,3 +13,6 @@ soundbank.h
 
 # OS cruft
 .DS_Store
+
+# Editor / AI tooling
+.cursor/
