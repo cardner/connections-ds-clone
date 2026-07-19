@@ -1,0 +1,15 @@
+# Build intermediates
+build/
+
+# Linked / packaged output
+*.elf
+*.nds
+*.dsi
+*.map
+
+# maxmod soundbank artifacts
+soundbank.bin
+soundbank.h
+
+# OS cruft
+.DS_Store

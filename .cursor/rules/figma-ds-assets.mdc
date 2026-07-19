@@ -1,0 +1,29 @@
+---
+description: Figma or local BMP → DS assets — procedural icons vs 8-bit embeds
+globs: source/ui_*.cpp,source/gfx.cpp,include/gfx.hpp,include/ui.hpp,data/**,*.bmp
+alwaysApply: false
+---
+
+# Figma / local BMP → Connections DS
+
+When porting icons from Figma **or** local `.bmp` files into this app, follow `.cursor/skills/figma-to-ds-assets/SKILL.md`.
+
+## Hard rules
+
+- **No SVG** at runtime. Do not paste SVG paths into C++.
+- **Procedural first** for toolbar/control glyphs (and simple local BMPs of the same kind) using `gfx::strokeLine`, `fillRing`, `fillCircle`, `plotDisk`, `fillTriangle`, `fillRoundRect` / `roundPanel`.
+- **Trace local glyph BMPs** into `draw*Icon` when the user wants procedural UI — Read the image, recipe ≤5 primitives, then code. Do not re-embed those as raster “for convenience.”
+- **BMP embed only** for logos / complex fills: 8-bit Windows BMP (BI_RGB) in `data/`, drawn with `gfx::drawBmp` / `drawBmpSized`. White = transparent.
+- **Scale**: Figma often 1024 → DS 256 (`×0.25`); BMPs scale ink bounds to existing toolbar glyph size (`r` ≈ 5–8). Integer layout; float pens for AA strokes.
+- **Tintable icons**: `draw*Icon(cx, cy, r, u16 c)` — never bake enabled/disabled colors into geometry.
+- **Palette**: map hexes / BMP ink to `gfx::pal` (`toolIcon`, `disText`, `disabled`, `submit`, …).
+- **Banner**: root `icon.bmp` is ROM banner only (Makefile syncs `data/logo.bmp`) — not toolbar icons.
+
+## Pattern
+
+```cpp
+// ✅ center + radius + color (see ui_bottom.cpp)
+static void drawFooIcon(bool bottom, int cx, int cy, int r, u16 c);
+
+// ❌ fixed color / SVG / embedding a simple glyph BMP instead of tracing it
+```
