@@ -5,6 +5,7 @@
 #include "sprite.hpp"
 
 #include "toolInfo_grf.h"
+#include "settings_grf.h"
 #include "toolSyncOn_grf.h"
 #include "toolSyncOff_grf.h"
 #include "toolShuffleOn_grf.h"
@@ -42,13 +43,18 @@ constexpr int BAR_BOTTOM_H = 28;
 
 int lerpI(int a, int b, float t) { return a + (int)lroundf((float)(b - a) * t); }
 
-// --- Toolbar (Info, Sync, Stats, Shuffle, Deselect, Submit) ---
+// --- Toolbar (Info, Settings, Sync, Shuffle, Deselect, Submit) ---
 // Bare glyphs on the left, framed chips on the right (Figma strip node 8:207,
 // re-spaced for the sixth control).
 constexpr int BTN_H = 32;      // touch hit height
 constexpr int BTN_W = 40;      // touch hit width
 constexpr int BTN_Y = 158;
 constexpr int BTN_CX[ui::BTN_COUNT] = {22, 62, 102, 142, 188, 232};
+
+// Stats/finished toolbar centers (Info, Settings, Sync, Stats, Share). The
+// three left glyphs stay put relative to the play toolbar; Stats + Share sit on
+// the right so the row reads as data/toolbar-stats.png.
+constexpr int STAT_CX[ui::STAT_COUNT] = {22, 62, 102, 188, 232};
 // Deselect/Submit chips match data/{deselect,submit}-*.bmp (20×20).
 constexpr int FRAME_W = 20;
 constexpr int FRAME_H = 20;
@@ -164,8 +170,8 @@ Rect ui::buttonRect(Btn b) {
 const char *ui::buttonLabel(Btn b) {
 	switch (b) {
 		case BTN_INFO:     return "Info";
+		case BTN_SETTINGS: return "Settings";
 		case BTN_SYNC:     return "Sync";
-		case BTN_STATS:    return "Stats";
 		case BTN_SHUFFLE:  return "Shuffle";
 		case BTN_DESELECT: return "Deselect";
 		case BTN_SUBMIT:   return "Submit";
@@ -405,11 +411,11 @@ static void toolbarGrf(const Game &g, ui::Btn b, bool syncing, const void **grf,
 	bool canSubmit = playing && g.selectedCount == CARDS_PER_CATEGORY;
 	switch (b) {
 		case ui::BTN_INFO:  *grf = toolInfo_grf;  *len = toolInfo_grf_size;  break;
+		case ui::BTN_SETTINGS: *grf = settings_grf; *len = settings_grf_size; break;
 		case ui::BTN_SYNC:
 			*grf = syncing ? toolSyncOff_grf : toolSyncOn_grf;
 			*len = syncing ? toolSyncOff_grf_size : toolSyncOn_grf_size;
 			break;
-		case ui::BTN_STATS: *grf = stats_grf; *len = stats_grf_size; break;
 		case ui::BTN_SHUFFLE:
 			*grf = playing ? toolShuffleOn_grf : toolShuffleOff_grf;
 			*len = playing ? toolShuffleOn_grf_size : toolShuffleOff_grf_size;
@@ -592,25 +598,99 @@ void ui::drawHelp() {
 	img::blitGrf(false, 0, 0, howtoBottom_grf, howtoBottom_grf_size);
 }
 
+// --- Settings panel ---
+
+namespace {
+
+constexpr int SET_ROW_X = 10;
+constexpr int SET_ROW_W = 236;
+constexpr int SET_ROW_H = 22;
+constexpr int SET_ROW_Y0 = 34;
+constexpr int SET_ROW_PITCH = 25;
+
+const char *settingsLabel(int i) {
+	switch (i) {
+		case ui::SET_PLAY_PREV:  return "Play a previous puzzle";
+		case ui::SET_BACK_TODAY: return "Back to today's puzzle";
+		case ui::SET_VIEW_STATS: return "View statistics";
+		case ui::SET_AUTOSYNC:   return "Auto-sync on launch";
+		case ui::SET_CONFIRM:    return "Confirm before submit";
+		case ui::SET_RESET:      return "Reset statistics";
+		default:                 return "";
+	}
+}
+
+void drawTogglePill(const Rect &row, bool on) {
+	const int pw = 40, ph = 16;
+	int px = row.x + row.w - pw - 6;
+	int py = row.y + (row.h - ph) / 2;
+	u16 fill = on ? gfx::pal::submit : gfx::pal::disabled;
+	u16 tcol = on ? gfx::pal::white : gfx::pal::dim;
+	gfx::fillRoundRect(false, px, py, pw, ph, 8, fill);
+	int th = font::height(font::Face::Regular);
+	gfx::drawTextCentered(false, px + pw / 2, py + (ph - th) / 2, on ? "On" : "Off", tcol, 1, true);
+}
+
+} // namespace
+
+Rect ui::settingsCloseRect() { return {228, 4, 24, 24}; }
+bool ui::hitSettingsClose(int px, int py) { return settingsCloseRect().contains(px, py); }
+
+Rect ui::settingsRowRect(int i) {
+	return {SET_ROW_X, SET_ROW_Y0 + i * SET_ROW_PITCH, SET_ROW_W, SET_ROW_H};
+}
+
+int ui::hitSettingsRow(int px, int py) {
+	for (int i = 0; i < SET_COUNT; i++)
+		if (settingsRowRect(i).contains(px, py)) return i;
+	return -1;
+}
+
+void ui::drawSettings(const SettingsView &v, int focus) {
+	// Top screen: hero title + which puzzle is loaded.
+	gfx::clear(true, gfx::pal::bg);
+	gfx::drawTextCentered(true, gfx::SCREEN_W / 2, 66, "Settings", gfx::pal::ink, 2, true);
+	if (v.modeLabel && v.modeLabel[0])
+		gfx::drawTextCentered(true, gfx::SCREEN_W / 2, 104, v.modeLabel, gfx::pal::dim, 1, false);
+
+	// Bottom screen: option list + close affordance.
+	gfx::clear(false, gfx::pal::bg);
+	Rect cx = settingsCloseRect();
+	gfx::strokeLine(false, cx.x + 7, cx.y + 7, cx.x + cx.w - 7, cx.y + cx.h - 7, 1.3f, gfx::pal::ink);
+	gfx::strokeLine(false, cx.x + 7, cx.y + cx.h - 7, cx.x + cx.w - 7, cx.y + 7, 1.3f, gfx::pal::ink);
+
+	int th = font::height(font::Face::Regular);
+	for (int i = 0; i < SET_COUNT; i++) {
+		Rect r = settingsRowRect(i);
+		bool disabled = (i == SET_BACK_TODAY && !v.archiveActive);
+		u16 col = disabled ? gfx::pal::disText : gfx::pal::ink;
+		gfx::drawText(false, r.x + 8, r.y + (r.h - th) / 2, settingsLabel(i), col, 1, false);
+		if (i == SET_AUTOSYNC) drawTogglePill(r, v.autoSync);
+		else if (i == SET_CONFIRM) drawTogglePill(r, v.confirmSubmit);
+	}
+
+	if (focus >= 0 && focus < SET_COUNT) {
+		Rect r = settingsRowRect(focus);
+		gfx::roundRectBorder(false, r.x, r.y, r.w, r.h, 6, gfx::pal::focus, 2);
+	}
+}
+
 // --- End-of-game stats screen ---
 
 Rect ui::statButtonRect(StatBtn b) {
-	switch (b) {
-		// Same hit targets / placement as the main-page toolbar controls; Share
-		// takes the far-right slot (where Submit sits during play).
-		case STAT_INFO:  return buttonRect(BTN_INFO);
-		case STAT_SYNC:  return buttonRect(BTN_SYNC);
-		case STAT_SHARE: return buttonRect(BTN_SUBMIT);
-		default:         return {0, 0, 0, 0};
-	}
+	if (b < 0 || b >= STAT_COUNT) return {0, 0, 0, 0};
+	int cx = STAT_CX[(int)b];
+	return {cx - BTN_W / 2, BTN_Y, BTN_W, BTN_H};
 }
 
 const char *ui::statButtonLabel(StatBtn b) {
 	switch (b) {
-		case STAT_SHARE: return "Share";
-		case STAT_INFO:  return "Info";
-		case STAT_SYNC:  return "Sync";
-		default:         return "";
+		case STAT_INFO:     return "Info";
+		case STAT_SETTINGS: return "Settings";
+		case STAT_SYNC:     return "Sync";
+		case STAT_STATS:    return "Stats";
+		case STAT_SHARE:    return "Share";
+		default:            return "";
 	}
 }
 
@@ -655,25 +735,35 @@ static void drawGuessGrid(const Game &g, int top, int bottom) {
 	}
 }
 
-void ui::drawStats(const Game &g, const Stats &s, int focus) {
+void ui::drawStats(const Game &g, const Stats &s, int focus, bool archive) {
 	gfx::clear(false, gfx::pal::bg);
 
 	bool won = (g.status == GameStatus::Won);
-	gfx::drawTextCentered(false, gfx::SCREEN_W / 2, 8, won ? "Solved!" : "Next time!",
-	                      gfx::pal::ink, 1, true);
+	const char *title = (g.status == GameStatus::Playing) ? "Statistics"
+	                    : (won ? "Solved!" : "Next time!");
+	gfx::drawTextCentered(false, gfx::SCREEN_W / 2, 8, title, gfx::pal::ink, 1, true);
 
-	int winPct = s.played > 0 ? (s.wins * 100 + s.played / 2) / s.played : 0;
-	drawStatCol(32, s.played, "Played", false);
-	drawStatCol(96, winPct, "Win", true);
-	drawStatCol(160, s.streak, "Streak", false);
-	drawStatCol(224, s.maxStreak, "Best", false);
+	if (archive) {
+		// Practice puzzles never touch lifetime stats; show a clear note instead
+		// of the counters so the numbers can't be misread as "this counted".
+		gfx::drawTextCentered(false, gfx::SCREEN_W / 2, 34, "Practice - not counted",
+		                      gfx::pal::dim, 1, false);
+	} else {
+		int winPct = s.played > 0 ? (s.wins * 100 + s.played / 2) / s.played : 0;
+		drawStatCol(32, s.played, "Played", false);
+		drawStatCol(96, winPct, "Win", true);
+		drawStatCol(160, s.streak, "Streak", false);
+		drawStatCol(224, s.maxStreak, "Best", false);
+	}
 
 	// Guess recap grid between the stats and the toolbar row (BTN_Y = 158).
 	drawGuessGrid(g, 72, BTN_Y - 8);
 
-	// Toolbar row: Info + Sync on the left, Share on the right (all bare glyphs).
+	// Toolbar row (Info, Settings, Sync, Stats, Share) — all bare glyphs.
 	blitTool(statButtonRect(STAT_INFO), toolInfo_grf, toolInfo_grf_size);
+	blitTool(statButtonRect(STAT_SETTINGS), settings_grf, settings_grf_size);
 	blitTool(statButtonRect(STAT_SYNC), toolSyncOn_grf, toolSyncOn_grf_size);
+	blitTool(statButtonRect(STAT_STATS), stats_grf, stats_grf_size);
 	blitTool(statButtonRect(STAT_SHARE), share_grf, share_grf_size);
 
 	if (focus >= 0 && focus < STAT_COUNT) {

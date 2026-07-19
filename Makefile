@@ -103,7 +103,7 @@ SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 # GRF bitmap and embedded via bin2o. Enumerated explicitly so stray files in
 # gfx/ never enter the build. Regenerate the PNGs with `python3 tools/gen_gfx.py`.
 GFXASSETS := toolInfo toolSyncOn toolSyncOff toolShuffleOn toolShuffleOff \
- deselectActive deselectDisabled submitActive submitDisabled \
+ settings deselectActive deselectDisabled submitActive submitDisabled \
  howtoTop howtoBottom header stats share
 GRFFILES := $(addsuffix .grf,$(GFXASSETS))
 

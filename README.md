@@ -16,9 +16,9 @@ you share your result as a scannable **QR code**, Wordle-style.
     stacked in the order you found them (with the answers revealed), and a live
     view of your current selection as you tap tiles.
   - *Bottom (touch) screen:* the 4×4 word grid plus a single row of icon
-    buttons — Sync (refresh), Shuffle, Deselect (✕), Submit (✓). When a game
-    finishes it becomes a stats screen (played, win %, streak, best) with the
-    `Share` button.
+    buttons — Info, Settings (⚙), Sync (refresh), Shuffle, Deselect (✕),
+    Submit (✓). When a game finishes it becomes a stats screen (played, win %,
+    streak, best) with Info, Settings, Sync, Stats, and `Share`.
 - **Real Connections rules:** pick 4, "one away" feedback when 3/4 match, four
   mistakes allowed, correct groups reveal and collapse the grid, win/loss, and a
   colored-square result grid for sharing.
@@ -26,8 +26,14 @@ you share your result as a scannable **QR code**, Wordle-style.
 - **Offline fallback** puzzle bundled in the ROM so it always boots into a game.
 - **QR + text sharing:** renders a QR of your emoji result on the bottom screen
   and writes `share.txt` to the SD card.
+- **Settings panel** (⚙, on both toolbars): toggle auto-sync on launch and
+  confirm-before-submit, reset statistics, and jump into a **previous day's
+  puzzle** as *practice* — the most recent day you haven't completed yet.
+- **Practice / archive play:** past-date puzzles are clearly marked "Practice"
+  and never affect your lifetime stats or streak; the archive jump automatically
+  skips days you've already finished.
 - **Save data** on SD: resume today's in-progress board, plus lifetime stats
-  (played, wins, streak, max streak).
+  (played, wins, streak, max streak) and your preferences.
 - **Sleep on lid close:** closing the hinge puts the console into low-power
   sleep and resumes exactly where you left off (RAM is retained), to save
   battery.
@@ -192,13 +198,21 @@ focused.
 | Shuffle the board | `Shuffle` | `X` (or focus + `A`) |
 | Clear selection | `Deselect` | `Y` (or focus + `A`) |
 | Fetch latest puzzle | `Sync` | focus `Sync` + `A` |
+| Open Settings | `Settings` (⚙) | focus `Settings` + `A` |
+| Close Settings / stats (back) | tap ✕ / `B` | `B` |
 | Show share QR (on the stats screen) | `Share` | focus `Share` + `A` |
 | Close the share screen (back to stats) | tap / `B` | `B` |
 | Quit | — | `START` |
 
+The **Settings** panel (⚙) is reachable from both the play and stats toolbars.
+It toggles auto-sync and confirm-before-submit, resets statistics, opens the
+statistics screen, and lets you **play a previous puzzle** (practice mode). A
+practice puzzle is labelled "Practice", never counts toward your stats, and
+"Back to today's puzzle" returns you to the current daily board.
+
 When a game ends, the bottom screen switches to a **stats screen** (games
-played, win %, current streak, best streak). `Share` only appears here — use the
-D-pad + `A` (or touch) to pick `Share` or `Sync`.
+played, win %, current streak, best streak) with `Share` — use the D-pad + `A`
+(or touch) to pick a toolbar button, or `B` to return to the board.
 
 ## Sharing
 
@@ -223,7 +237,12 @@ Solved (4/6)
 Stored on the SD card under `sd:/_nds/ConnectionsDS/`:
 
 - `progress.sav` — today's board state (resumed on next launch for the same date).
+- `archive.sav` — in-progress board for a practice (past-date) puzzle, kept
+  separate so browsing old days never clobbers today's board.
 - `stats.sav` — played / wins / current streak / max streak.
+- `prefs.sav` — Settings preferences (auto-sync, confirm-before-submit).
+- `played.dat` — bitset of completed puzzle dates, used so the archive jump
+  skips days you've already finished.
 - `share.txt` — the most recent share text.
 
 ## Implementation notes

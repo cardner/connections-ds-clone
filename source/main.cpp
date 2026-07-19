@@ -27,12 +27,28 @@
 
 namespace {
 
-enum class AppState { Playing, Stats, Share, Help };
+enum class AppState { Playing, Stats, Share, Help, Settings };
+
+// Daily = today's official puzzle (counts toward lifetime stats). Archive =
+// a past-date "practice" puzzle reached from Settings; it never touches stats.
+enum class PlayMode { Daily, Archive };
 
 Game g;
 Stats stats;
+Prefs prefs;
+PlayMode playMode = PlayMode::Daily;
 AppState appState = AppState::Playing;
 int statFocus = 0; // focused StatBtn on the stats screen
+int settingsFocus = 0; // focused SettingsItem on the settings panel
+
+// The most recent daily puzzle, kept so "Back to today's puzzle" can leave
+// practice mode and restore today's board (progress is resumed from SD).
+Puzzle dailyPuzzle;
+
+// Confirm-before-submit arming: first Submit press only arms; a second press
+// within the window actually submits.
+bool submitArmed = false;
+int submitArmFrames = 0;
 
 char toast[64] = {0};
 int toastFrames = 0;
@@ -112,20 +128,15 @@ bool gameInProgress(const Game &g) {
 	       (g.solvedCount > 0 || g.mistakes > 0 || g.selectedCount > 0);
 }
 
-void startGame(const Puzzle &p) {
-	// Resume saved progress for this date if present, else start fresh.
-	Game loaded;
-	if (storage::loadProgress(loaded, p.date) && loaded.puzzle.valid) {
-		g = loaded;
-	} else {
-		game::init(g, p);
-		game::shuffle(g);
-	}
+// Reset the transient view/focus state after `g` has been (re)loaded.
+void resetViewAfterLoad() {
 	resultRecorded = (g.status != GameStatus::Playing);
 	appState = AppState::Playing;
 	solvePlaying = false;
 	anim::solve().active = false;
 	topStatus[0] = 0;
+	submitArmed = false;
+	submitArmFrames = 0;
 	selReset();
 	focusZone = Zone::Tiles;
 	tileCursor = 0;
@@ -133,12 +144,53 @@ void startGame(const Puzzle &p) {
 	dirty = true;
 }
 
+void startGame(const Puzzle &p) {
+	// Today's daily puzzle: resume its saved progress if present, else fresh.
+	playMode = PlayMode::Daily;
+	dailyPuzzle = p;
+	Game loaded;
+	if (storage::loadProgress(loaded, p.date) && loaded.puzzle.valid) {
+		g = loaded;
+	} else {
+		game::init(g, p);
+		game::shuffle(g);
+	}
+	resetViewAfterLoad();
+}
+
+void startArchive(const Puzzle &p) {
+	// Past-date practice puzzle: resume from the separate archive slot so the
+	// daily board on SD is never disturbed.
+	playMode = PlayMode::Archive;
+	Game loaded;
+	if (storage::loadArchive(loaded, p.date) && loaded.puzzle.valid) {
+		g = loaded;
+	} else {
+		game::init(g, p);
+		game::shuffle(g);
+	}
+	resetViewAfterLoad();
+}
+
+// Persist the in-progress board to the slot matching the current mode.
+void persistProgress() {
+	if (playMode == PlayMode::Archive)
+		storage::saveArchive(g);
+	else
+		storage::saveProgress(g);
+}
+
 void finalizeIfOver() {
 	if (g.status == GameStatus::Playing || resultRecorded)
 		return;
 	bool won = (g.status == GameStatus::Won);
-	storage::recordResult(stats, g, won);
-	storage::saveStats(stats);
+	// Only the daily puzzle counts toward lifetime stats; practice is excluded.
+	if (playMode == PlayMode::Daily) {
+		storage::recordResult(stats, g, won);
+		storage::saveStats(stats);
+	}
+	// Mark the date complete in both modes so the archive jump skips it later.
+	storage::markPlayed(g.puzzle.date);
 	// Top screen keeps the puzzle summary; no end-of-game status line.
 	topStatus[0] = 0;
 	resultRecorded = true;
@@ -212,7 +264,7 @@ void doSubmit() {
 		case SubmitResult::Wrong:           setToast("Not quite"); break;
 	}
 	selReset(); // submit() clears the selection regardless of the outcome
-	storage::saveProgress(g);
+	persistProgress();
 
 	if (r == SubmitResult::Correct) {
 		startSolveAnim(preBoard, preCount, preSelected);
@@ -220,6 +272,22 @@ void doSubmit() {
 		finalizeIfOver();
 	}
 	dirty = true;
+}
+
+// Submit gated by the "confirm before submit" preference: the first press arms
+// (and toasts); a second press within the window commits the guess.
+void requestSubmit() {
+	if (g.status != GameStatus::Playing || g.selectedCount != CARDS_PER_CATEGORY)
+		return;
+	if (prefs.confirmSubmit && !submitArmed) {
+		submitArmed = true;
+		submitArmFrames = 90; // ~1.5s at 60fps
+		setToast("Tap Submit again");
+		return;
+	}
+	submitArmed = false;
+	submitArmFrames = 0;
+	doSubmit();
 }
 
 void doSync() {
@@ -328,6 +396,7 @@ void toggleTile(int boardIndex) {
 	bool now = g.selected[pos];
 	if (now && !was) selPush(pos);
 	else if (!now && was) selRemove(pos);
+	submitArmed = false; // any selection change re-arms confirm-before-submit
 	dirty = true;
 }
 
@@ -341,8 +410,9 @@ void undoSelection() {
 	dirty = true;
 }
 
-// Help can be opened from Playing or Stats; closing returns to the opener.
+// Help / Settings can be opened from Playing or Stats; closing returns there.
 AppState helpReturn = AppState::Playing;
+AppState settingsReturn = AppState::Playing;
 
 void openHelp() {
 	helpReturn = appState;
@@ -350,26 +420,135 @@ void openHelp() {
 	dirty = true;
 }
 
+void openSettings() {
+	settingsReturn = appState;
+	appState = AppState::Settings;
+	settingsFocus = 0;
+	dirty = true;
+}
+
+void closeSettings() {
+	appState = settingsReturn;
+	dirty = true;
+}
+
+// Open the statistics screen (also usable mid-game from Settings).
+void openStatsScreen() {
+	appState = AppState::Stats;
+	statFocus = (int)ui::STAT_SHARE;
+	dirty = true;
+}
+
+// Jump into the most recent unplayed puzzle before today (practice mode).
+void doPlayPrevious() {
+	char today[16];
+	todayDate(today, sizeof(today));
+	if (!today[0]) {
+		// RTC gave nothing; fall back to the loaded daily puzzle's date.
+		strncpy(today, dailyPuzzle.date, sizeof(today) - 1);
+		today[sizeof(today) - 1] = 0;
+	}
+
+	char date[16];
+	if (!today[0] || !storage::findLatestUnplayedBefore(today, date, sizeof(date))) {
+		setToast("No previous puzzles left");
+		return;
+	}
+
+	// Preserve today's board before leaving it, then drop the panel so network
+	// feedback shows over the board just like a normal Sync.
+	if (playMode == PlayMode::Daily)
+		storage::saveProgress(g);
+	appState = AppState::Playing;
+
+	ui::drawTop(g, "Loading previous puzzle...");
+	ui::drawBottom(g, "", true);
+	gfx::flip();
+
+	if (!net::wifiConnect()) {
+		net::wifiDisconnect();
+		setToast("Wi-Fi failed (DSi mode?)");
+		return;
+	}
+
+	static char buf[NET_BUFFER_SIZE];
+	int len = 0;
+	char path[40];
+	snprintf(path, sizeof(path), "%s%s", PROXY_PATH_ARCHIVE_PREFIX, date);
+	net::Result nr = net::httpGet(PROXY_HOST, PROXY_PORT, path, buf, sizeof(buf), &len);
+	net::wifiDisconnect();
+
+	if (nr != net::Result::Ok) {
+		setToast(net::describe(nr));
+		return;
+	}
+
+	Puzzle p;
+	if (!puzzle::parseCompact(buf, len, p)) {
+		setToast("Bad puzzle data");
+		return;
+	}
+
+	startArchive(p);
+	char msg[64];
+	snprintf(msg, sizeof(msg), "Practice %s", p.date);
+	setToast(msg);
+}
+
+// Leave practice mode and restore today's daily puzzle (progress resumes from SD).
+void backToToday() {
+	if (playMode != PlayMode::Archive || !dailyPuzzle.valid) {
+		closeSettings();
+		return;
+	}
+	startGame(dailyPuzzle);
+	setToast("Back to today's puzzle");
+}
+
+void resetStats() {
+	memset(&stats, 0, sizeof(stats));
+	storage::saveStats(stats);
+	storage::clearPlayed();
+	setToast("Statistics reset");
+}
+
+void activateSettingsItem(int i) {
+	switch (i) {
+		case ui::SET_PLAY_PREV:  doPlayPrevious(); break;
+		case ui::SET_BACK_TODAY:
+			if (playMode == PlayMode::Archive) backToToday();
+			else setToast("Already on today's puzzle");
+			break;
+		case ui::SET_VIEW_STATS: openStatsScreen(); break;
+		case ui::SET_AUTOSYNC:
+			prefs.autoSync = !prefs.autoSync;
+			storage::savePrefs(prefs);
+			dirty = true;
+			break;
+		case ui::SET_CONFIRM:
+			prefs.confirmSubmit = !prefs.confirmSubmit;
+			storage::savePrefs(prefs);
+			dirty = true;
+			break;
+		case ui::SET_RESET:      resetStats(); break;
+		default: break;
+	}
+}
+
 void activateButton(ui::Btn b) {
 	bool playing = (g.status == GameStatus::Playing);
 	switch (b) {
 		case ui::BTN_INFO:     openHelp(); break;
-		case ui::BTN_STATS:
-			appState = AppState::Stats;
-			statFocus = (int)ui::STAT_SHARE;
-			break;
+		case ui::BTN_SETTINGS: openSettings(); break;
 		case ui::BTN_SHUFFLE:  if (playing) game::shuffle(g); break;
 		case ui::BTN_DESELECT:
 			if (playing && g.selectedCount > 0) {
 				game::deselectAll(g);
 				selReset();
+				submitArmed = false;
 			}
 			break;
-		case ui::BTN_SUBMIT:
-			// Active only with a full guess of 4 selected tiles.
-			if (playing && g.selectedCount == CARDS_PER_CATEGORY)
-				doSubmit();
-			break;
+		case ui::BTN_SUBMIT:   requestSubmit(); break;
 		case ui::BTN_SYNC:     doSync(); break;
 		default: break;
 	}
@@ -457,9 +636,11 @@ void activateFocus() {
 
 void activateStatButton(ui::StatBtn b) {
 	switch (b) {
-		case ui::STAT_SHARE: doShare(); break;
-		case ui::STAT_INFO:  openHelp(); break;
-		case ui::STAT_SYNC:  doSync(); break;
+		case ui::STAT_INFO:     openHelp(); break;
+		case ui::STAT_SETTINGS: openSettings(); break;
+		case ui::STAT_SYNC:     doSync(); break;
+		case ui::STAT_STATS:    appState = AppState::Playing; dirty = true; break; // back to board
+		case ui::STAT_SHARE:    doShare(); break;
 		default: break;
 	}
 }
@@ -488,9 +669,22 @@ void render() {
 		return;
 	}
 
+	if (appState == AppState::Settings) {
+		ui::SettingsView v;
+		v.autoSync = prefs.autoSync;
+		v.confirmSubmit = prefs.confirmSubmit;
+		v.archiveActive = (playMode == PlayMode::Archive);
+		static char modeLabel[48];
+		snprintf(modeLabel, sizeof(modeLabel), "%s %s",
+		         v.archiveActive ? "Practice:" : "Today:", g.puzzle.date);
+		v.modeLabel = modeLabel;
+		ui::drawSettings(v, settingsFocus);
+		return;
+	}
+
 	if (appState == AppState::Stats) {
 		ui::drawTop(g, topStatus);
-		ui::drawStats(g, stats, statFocus);
+		ui::drawStats(g, stats, statFocus, playMode == PlayMode::Archive);
 		return;
 	}
 
@@ -539,10 +733,13 @@ int main(void) {
 	gfx::flip();
 
 	bool sdOk = storage::init();
-	if (sdOk)
+	if (sdOk) {
 		storage::loadStats(stats);
-	else
+		storage::loadPrefs(prefs);
+	} else {
 		memset(&stats, 0, sizeof(stats));
+		storage::defaultPrefs(prefs);
+	}
 
 	// Start from the bundled puzzle so the game is playable offline; the user
 	// can tap Sync to fetch the latest daily puzzle from the proxy.
@@ -555,8 +752,10 @@ int main(void) {
 	startGame(p);
 
 	// If we're not resuming an in-progress game and the bundled/last-saved
-	// puzzle is stale, try to fetch today's puzzle before the player starts.
-	autoSyncIfStale();
+	// puzzle is stale, try to fetch today's puzzle before the player starts
+	// (unless the player disabled auto-sync in Settings).
+	if (prefs.autoSync)
+		autoSyncIfStale();
 
 	if (!sdOk)
 		setToast("No SD: progress won't save", 240);
@@ -578,6 +777,21 @@ int main(void) {
 				appState = helpReturn;
 				dirty = true;
 			}
+		} else if (appState == AppState::Settings) {
+			if (down & KEY_UP)   { if (settingsFocus > 0) { settingsFocus--; dirty = true; } }
+			if (down & KEY_DOWN) { if (settingsFocus < ui::SET_COUNT - 1) { settingsFocus++; dirty = true; } }
+			if (down & KEY_A) activateSettingsItem(settingsFocus);
+			if (down & KEY_B) closeSettings();
+			if (down & KEY_TOUCH) {
+				touchPosition touch;
+				touchRead(&touch);
+				if (ui::hitSettingsClose(touch.px, touch.py)) {
+					closeSettings();
+				} else {
+					int row = ui::hitSettingsRow(touch.px, touch.py);
+					if (row >= 0) { settingsFocus = row; activateSettingsItem(row); }
+				}
+			}
 		} else if (appState == AppState::Share) {
 			if (down & KEY_B) {
 				appState = AppState::Stats; // back to the stats screen
@@ -591,6 +805,7 @@ int main(void) {
 			if (down & (KEY_LEFT | KEY_UP))    { if (statFocus > 0) { statFocus--; dirty = true; } }
 			if (down & (KEY_RIGHT | KEY_DOWN)) { if (statFocus < ui::STAT_COUNT - 1) { statFocus++; dirty = true; } }
 			if (down & KEY_A) activateStatButton((ui::StatBtn)statFocus);
+			if (down & KEY_B) { appState = AppState::Playing; dirty = true; } // back to board
 
 			if (down & KEY_TOUCH) {
 				touchPosition touch;
@@ -628,6 +843,12 @@ int main(void) {
 			toastFrames--;
 			if (toastFrames == 0)
 				dirty = true;
+		}
+
+		if (submitArmFrames > 0) {
+			submitArmFrames--;
+			if (submitArmFrames == 0)
+				submitArmed = false;
 		}
 
 		// Finish the completed-row transition: settle the board, then run the

@@ -328,6 +328,32 @@ def icon_shuffle(cv, cx, cy, color, r=7):
     fill_tri(cv, [(ax - 5, cy + r - 6), (ax - 5, cy + r), (ax + 2, cy + r - 3)], color)
 
 
+def icon_settings(cv, cx, cy, color):
+    # Gear/cog traced from data/settings.png: a solid ring body with eight flat
+    # trapezoidal teeth and a hollow center. The ring leaves the hole
+    # transparent so the glyph tints cleanly on any chip.
+    cxx, cyy = cx + 0.5, cy + 0.5
+    hole_r = 3.0
+    body_outer = 6.2
+    r_base = 5.4  # teeth start just inside the body so they merge seamlessly
+    r_tip = 9.0
+    wb = 2.4      # tooth half-width at the base
+    wt = 1.7      # tooth half-width at the tip
+    for i in range(8):
+        a = i * math.pi / 4.0
+        ux, uy = math.cos(a), -math.sin(a)      # radial direction
+        tx, ty = -uy, ux                        # tangential direction
+        bx, by = cxx + ux * r_base, cyy + uy * r_base
+        px, py = cxx + ux * r_tip, cyy + uy * r_tip
+        p1 = (bx + tx * wb, by + ty * wb)
+        p2 = (bx - tx * wb, by - ty * wb)
+        p3 = (px - tx * wt, py - ty * wt)
+        p4 = (px + tx * wt, py + ty * wt)
+        fill_tri(cv, [p1, p2, p3], color)
+        fill_tri(cv, [p1, p3, p4], color)
+    fill_ring(cv, cxx, cyy, body_outer, hole_r, color)
+
+
 def icon_cross(cv, cx, cy, color, r=4):
     stroke_line(cv, cx - r, cy - r, cx + r, cy + r, 1.2, color)
     stroke_line(cv, cx - r, cy + r, cx + r, cy - r, 1.2, color)
@@ -353,6 +379,11 @@ def bare_icon(name, draw, color, size=20):
 
 
 def framed_icon(name, draw, glyph_color, *, fill=None, border=None, border_t=2, size=20):
+    # Framed controls (Deselect / Submit) may be hand-authored; never clobber an
+    # existing file (delete it first to regenerate a procedural placeholder).
+    if (GFX / name).exists():
+        print("skip (exists):", name)
+        return
     cv = Canvas(size, size, opaque=False)
     r = 3
     if fill is not None and border is not None and fill == border:
@@ -373,6 +404,7 @@ def gen_icons():
     bare_icon("toolSyncOff.png", icon_sync, DIS_TEXT)
     bare_icon("toolShuffleOn.png", icon_shuffle, TOOL_ICON)
     bare_icon("toolShuffleOff.png", icon_shuffle, DIS_TEXT)
+    bare_icon("settings.png", icon_settings, TOOL_ICON)
 
     # Deselect (X): active = hollow dark frame + dark X; disabled = gray chip.
     framed_icon("deselectActive.png", icon_cross, SELECTED, border=SELECTED, border_t=3)
@@ -444,6 +476,7 @@ def gen_help(regular: Face, small: Face):
 def write_grit_files():
     icon_names = [
         "toolInfo", "toolSyncOn", "toolSyncOff", "toolShuffleOn", "toolShuffleOff",
+        "settings",
         "deselectActive", "deselectDisabled", "submitActive", "submitDisabled",
     ]
     # Icons: transparent (magenta) key, 16bpp bitmap, uncompressed.

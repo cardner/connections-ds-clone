@@ -14,12 +14,13 @@ struct Rect {
 
 namespace ui {
 
-// Buttons available during play, left-to-right (Share lives on the stats
-// screen instead). Rendered as a single row of icon buttons.
+// Buttons available during play, left-to-right (Stats + Share live on the stats
+// screen instead). Rendered as a single row of icon buttons. Matches
+// data/toolbar-main.png: Info, Settings, Sync, Shuffle, Deselect, Submit.
 enum Btn {
 	BTN_INFO = 0,
+	BTN_SETTINGS,
 	BTN_SYNC,
-	BTN_STATS,
 	BTN_SHUFFLE,
 	BTN_DESELECT,
 	BTN_SUBMIT,
@@ -27,12 +28,33 @@ enum Btn {
 };
 
 // Buttons on the end-of-game stats screen (enum order = left-to-right focus/nav
-// order). Info + Sync sit on the left of the toolbar row; Share on the right.
+// order). Matches data/toolbar-stats.png: Info, Settings, Sync, Stats, Share.
 enum StatBtn {
 	STAT_INFO = 0,
+	STAT_SETTINGS,
 	STAT_SYNC,
+	STAT_STATS,
 	STAT_SHARE,
 	STAT_COUNT
+};
+
+// Rows in the Settings panel (enum order = top-to-bottom focus/nav order).
+enum SettingsItem {
+	SET_PLAY_PREV = 0, // jump into the most recent unplayed past puzzle
+	SET_BACK_TODAY,    // leave practice, return to today's daily puzzle
+	SET_VIEW_STATS,    // open the statistics screen
+	SET_AUTOSYNC,      // toggle: fetch today's puzzle on launch
+	SET_CONFIRM,       // toggle: require a second Submit tap
+	SET_RESET,         // wipe lifetime stats + completed-date log
+	SET_COUNT
+};
+
+// Snapshot of the state the Settings panel renders (owned by the caller).
+struct SettingsView {
+	bool autoSync;
+	bool confirmSubmit;
+	bool archiveActive; // true while a practice/past-date puzzle is loaded
+	const char *modeLabel; // e.g. "Today: 2026-07-19" or "Practice: 2025-01-02"
 };
 
 // Bottom-screen layout.
@@ -80,11 +102,19 @@ void drawHelp();
 Rect helpCloseRect();
 bool hitHelpClose(int px, int py);
 
-// End-of-game stats screen (bottom): statistics + Share / Sync / Board buttons.
-// `focus` highlights a StatBtn (or -1 for none).
+// Settings panel overlay (both screens). `focus` highlights a SettingsItem row.
+void drawSettings(const SettingsView &v, int focus);
+Rect settingsCloseRect();
+bool hitSettingsClose(int px, int py);
+Rect settingsRowRect(int i);
+int hitSettingsRow(int px, int py); // returns a SettingsItem or -1
+
+// End-of-game / statistics screen (bottom): statistics + toolbar buttons.
+// `focus` highlights a StatBtn (or -1 for none). `archive` shows the practice
+// (not-counted) variant for past-date puzzles.
 Rect statButtonRect(StatBtn b);
 const char *statButtonLabel(StatBtn b);
-void drawStats(const Game &g, const Stats &s, int focus);
+void drawStats(const Game &g, const Stats &s, int focus, bool archive);
 int hitStatButton(int px, int py);
 
 } // namespace ui

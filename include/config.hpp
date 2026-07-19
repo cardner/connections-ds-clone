@@ -11,6 +11,9 @@
 #define PROXY_HOST "connections-ds-proxy.driffterillustrations.workers.dev"
 #define PROXY_PORT 80
 #define PROXY_PATH_LATEST "/connections/latest"
+// Dated archive route (the Worker also serves /connections/YYYY-MM-DD). Build
+// the full path at runtime as PROXY_PATH_ARCHIVE_PREFIX "YYYY-MM-DD".
+#define PROXY_PATH_ARCHIVE_PREFIX "/connections/"
 
 // -------------------------------------------------------------------------
 // SD card paths (created on demand under the standard homebrew data dir).
@@ -19,6 +22,9 @@
 #define SAVE_PATH    APP_DIR "/progress.sav"
 #define STATS_PATH   APP_DIR "/stats.sav"
 #define SHARE_PATH   APP_DIR "/share.txt"
+#define PREFS_PATH   APP_DIR "/prefs.sav"
+#define ARCHIVE_PATH APP_DIR "/archive.sav"  // in-progress board for a past-date (practice) puzzle
+#define PLAYED_PATH  APP_DIR "/played.dat"   // bitset of completed puzzle dates (for archive skip)
 
 // Max HTTP response we will buffer (the compact puzzle is well under 1 KB).
 #define NET_BUFFER_SIZE 4096
