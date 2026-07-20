@@ -1,0 +1,69 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+
+# Allow the workflow to create releases / upload assets.
+permissions:
+  contents: write
+
+# Only keep the newest run for a given ref building at a time.
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Official devkitPro image: devkitARM + libnds/calico/dswifi/libfat and the
+    # grit / ndstool / bin2o toolchain the Makefile relies on.
+    container: devkitpro/devkitarm:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python (used by tools/*.py during grit conversion)
+        run: |
+          if ! command -v python3 >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends python3
+          fi
+
+      - name: Build ROMs
+        run: make
+
+      - name: Collect build outputs
+        run: |
+          mkdir -p dist
+          cp connections-ds.nds connections-ds.dsi connections-ds.elf dist/
+          ls -la dist
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: connections-ds-${{ github.sha }}
+          path: |
+            dist/connections-ds.nds
+            dist/connections-ds.dsi
+            dist/connections-ds.elf
+          if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }} (${{ github.sha }})
+          body: |
+            Automated build from `${{ github.sha }}` on push to `main`.
+
+            Artifacts:
+            - `connections-ds.dsi` - DSi-enhanced build (WPA2 Wi-Fi in DSi mode)
+            - `connections-ds.nds` - plain NDS ROM (flashcards / emulators)
+            - `connections-ds.elf` - unstripped ELF (debug symbols)
+          files: |
+            dist/connections-ds.nds
+            dist/connections-ds.dsi
+            dist/connections-ds.elf
+          fail_on_unmatched_files: true
